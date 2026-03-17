@@ -9,11 +9,11 @@ DESKTOP_DIR="$HOME/.local/share/applications"
 PROFILES_DIR="$HOME/.config/openvpn3-gui/profiles"
 
 # Extract version from the source file
-NEW_VERSION=$(grep -oP '(?<=APP_VERSION\s{1,4}=\s{1,4}")[^"]+' "$SCRIPT_DIR/vpn_gui.py")
+NEW_VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$SCRIPT_DIR/vpn_gui.py")
 
 # Detect existing install and its version
 if [ -f "$INSTALL_DIR/vpn_gui.py" ]; then
-    OLD_VERSION=$(grep -oP '(?<=APP_VERSION\s{1,4}=\s{1,4}")[^"]+' "$INSTALL_DIR/vpn_gui.py" 2>/dev/null || echo "unknown")
+    OLD_VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$INSTALL_DIR/vpn_gui.py" 2>/dev/null || echo "unknown")
     echo "Upgrading OpenVPN3 GUI: v$OLD_VERSION → v$NEW_VERSION"
 else
     echo "Installing OpenVPN3 GUI v$NEW_VERSION"
