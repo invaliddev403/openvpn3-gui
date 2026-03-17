@@ -179,6 +179,7 @@ class VPNWindow(QMainWindow):
         if not self._profile_names():
             self._append_log("[hint] No profiles found — use 'Import Profile' to add one.")
 
+        self._kill_orphaned_instances()
         self._cleanup_orphaned_sessions()
 
         self.poller = StatusPoller()
@@ -188,6 +189,29 @@ class VPNWindow(QMainWindow):
         self.poller.start(3000)
 
     # ── Startup cleanup ───────────────────────────────────────────────────────
+    def _kill_orphaned_instances(self):
+        """Send SIGTERM to any other running instances of this script."""
+        import signal as _signal
+        my_pid = os.getpid()
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "vpn_gui.py"],
+                capture_output=True, text=True
+            )
+            pids = [int(p) for p in result.stdout.split() if p.strip()]
+            orphans = [p for p in pids if p != my_pid]
+            if orphans:
+                for pid in orphans:
+                    try:
+                        os.kill(pid, _signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass  # already gone
+                self._append_log(
+                    f"[startup] Terminated {len(orphans)} orphaned instance(s): PIDs {orphans}"
+                )
+        except Exception as e:
+            self._append_log(f"[startup] Could not check for orphaned instances: {e}")
+
     def _cleanup_orphaned_sessions(self):
         """Disconnect any sessions that are in an error or unknown state."""
         try:
