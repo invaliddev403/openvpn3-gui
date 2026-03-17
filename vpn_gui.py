@@ -174,16 +174,64 @@ class VPNWindow(QMainWindow):
         self._build_tray()
         self._update_button_states()
 
+        self._append_log("OpenVPN3 GUI started")
+        self._append_log(f"Profiles directory: {PROFILES_DIR}")
+        if not self._profile_names():
+            self._append_log("[hint] No profiles found — use 'Import Profile' to add one.")
+
+        self._cleanup_orphaned_sessions()
+
         self.poller = StatusPoller()
         self.poller.status_changed.connect(self._on_status_changed)
         self.poller.session_changed.connect(self._on_session_changed)
         self.poller.log_line.connect(self._append_log)
         self.poller.start(3000)
 
-        self._append_log("OpenVPN3 GUI started")
-        self._append_log(f"Profiles directory: {PROFILES_DIR}")
-        if not self._profile_names():
-            self._append_log("[hint] No profiles found — use 'Import Profile' to add one.")
+    # ── Startup cleanup ───────────────────────────────────────────────────────
+    def _cleanup_orphaned_sessions(self):
+        """Disconnect any sessions that are in an error or unknown state."""
+        try:
+            result = subprocess.run(
+                [OPENVPN3, "sessions-list"],
+                capture_output=True, text=True, timeout=5
+            )
+            out = result.stdout + result.stderr
+        except Exception as e:
+            self._append_log(f"[startup] Could not list sessions: {e}")
+            return
+
+        if "No sessions available" in out:
+            return
+
+        # Split into per-session blocks on the dashed separator lines
+        blocks = [b for b in re.split(r"-{20,}", out) if b.strip()]
+
+        orphaned = []
+        for block in blocks:
+            path_match = re.search(r"(/net/openvpn/v3/sessions/\S+)", block)
+            if not path_match:
+                continue
+            path = path_match.group(1)
+            block_lower = block.lower()
+            if not any(s in block_lower for s in ("connected", "paused", "connecting", "get config")):
+                orphaned.append(path)
+
+        if not orphaned:
+            paths_found = re.findall(r"/net/openvpn/v3/sessions/\S+", out)
+            if paths_found:
+                self._append_log(f"[startup] {len(paths_found)} active session(s) found — leaving as-is.")
+            return
+
+        self._append_log(f"[startup] Found {len(orphaned)} orphaned session(s) — cleaning up…")
+        for path in orphaned:
+            try:
+                subprocess.run(
+                    [OPENVPN3, "session-manage", "--disconnect", "--path", path],
+                    capture_output=True, text=True, timeout=10
+                )
+                self._append_log(f"[startup] Cleaned up: {path}")
+            except Exception as e:
+                self._append_log(f"[startup] Failed to clean up {path}: {e}")
 
     # ── Profile helpers ───────────────────────────────────────────────────────
     def _profile_names(self) -> list[str]:
