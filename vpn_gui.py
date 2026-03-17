@@ -20,7 +20,8 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen
 
-OPENVPN3    = "/usr/bin/openvpn3"
+APP_VERSION  = "1.1.0"
+OPENVPN3     = "/usr/bin/openvpn3"
 PROFILES_DIR = os.path.expanduser("~/.config/openvpn3-gui/profiles")
 
 # ── Status constants ──────────────────────────────────────────────────────────
@@ -219,9 +220,14 @@ class VPNWindow(QMainWindow):
 
     # ── UI construction ───────────────────────────────────────────────────────
     def _build_ui(self):
-        self.setWindowTitle("OpenVPN3")
+        self.setWindowTitle(f"OpenVPN3 GUI  v{APP_VERSION}")
         self.setMinimumSize(560, 460)
         self.setWindowIcon(make_tray_icon(ST_DISCONNECTED))
+
+        help_menu = self.menuBar().addMenu("Help")
+        about_action = QAction("About OpenVPN3 GUI", self)
+        about_action.triggered.connect(self._on_about)
+        help_menu.addAction(about_action)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -396,6 +402,10 @@ class VPNWindow(QMainWindow):
         show_action = QAction("Show Window")
         show_action.triggered.connect(self.show_window)
         menu.addAction(show_action)
+
+        about_action = QAction(f"About  (v{APP_VERSION})")
+        about_action.triggered.connect(self._on_about)
+        menu.addAction(about_action)
 
         menu.addSeparator()
         quit_action = QAction("Quit")
@@ -588,6 +598,18 @@ class VPNWindow(QMainWindow):
         self.tray.showMessage(
             "OpenVPN3", "Running in tray. Right-click icon to quit.",
             QSystemTrayIcon.Information, 2000
+        )
+
+    def _on_about(self):
+        QMessageBox.about(
+            self,
+            "About OpenVPN3 GUI",
+            f"<b>OpenVPN3 GUI</b> &nbsp; v{APP_VERSION}<br><br>"
+            "A PyQt5 desktop client and tray icon for the <tt>openvpn3</tt> CLI.<br><br>"
+            "<b>Profiles:</b><br>"
+            f"<tt>{PROFILES_DIR}</tt><br><br>"
+            "<b>Backend:</b><br>"
+            f"<tt>{OPENVPN3}</tt>"
         )
 
     def _on_quit(self):
