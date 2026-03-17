@@ -215,7 +215,7 @@ class VPNWindow(QMainWindow):
         if current in names:
             self.profile_combo.setCurrentText(current)
         self.profile_combo.blockSignals(False)
-        self._on_profile_changed()
+        self._on_profile_changed()  # tray is built by the time this is called
 
     # ── UI construction ───────────────────────────────────────────────────────
     def _build_ui(self):
@@ -349,8 +349,11 @@ class VPNWindow(QMainWindow):
         btn_clear.clicked.connect(self.log_box.clear)
         root.addWidget(btn_clear, alignment=Qt.AlignRight)
 
-        # Initialise profile label
-        self._on_profile_changed()
+        # Initialise profile label directly — tray isn't built yet so we can't
+        # call _on_profile_changed() (which would reach _update_button_states).
+        name = self.profile_combo.currentText()
+        self.active_profile_label.setText(f"Profile: {name}" if name else "No profile selected")
+        self.btn_remove.setEnabled(bool(name))
 
     def _btn_style(self, bg, hover):
         return (
@@ -382,10 +385,19 @@ class VPNWindow(QMainWindow):
         menu.addAction(self._tray_disconnect_action)
 
         menu.addSeparator()
+        self._tray_profiles_menu = menu.addMenu("Profiles")
+        self._rebuild_tray_profiles_menu()
+
+        tray_import_action = QAction("Import Profile…")
+        tray_import_action.triggered.connect(self._on_tray_import_profile)
+        menu.addAction(tray_import_action)
+
+        menu.addSeparator()
         show_action = QAction("Show Window")
         show_action.triggered.connect(self.show_window)
         menu.addAction(show_action)
 
+        menu.addSeparator()
         quit_action = QAction("Quit")
         quit_action.triggered.connect(self._on_quit)
         menu.addAction(quit_action)
@@ -402,6 +414,7 @@ class VPNWindow(QMainWindow):
             self.active_profile_label.setText("No profile selected")
         has_profile = name is not None
         self.btn_remove.setEnabled(has_profile)
+        self._rebuild_tray_profiles_menu()
         self._update_button_states()
 
     def _on_import_profile(self):
@@ -443,6 +456,26 @@ class VPNWindow(QMainWindow):
         except OSError as e:
             self._append_log(f"[profile] Error removing {name}: {e}")
         self._refresh_profiles()
+
+    def _rebuild_tray_profiles_menu(self):
+        self._tray_profiles_menu.clear()
+        names = self._profile_names()
+        current = self._active_profile_name()
+        if not names:
+            empty = QAction("No profiles imported")
+            empty.setEnabled(False)
+            self._tray_profiles_menu.addAction(empty)
+            return
+        for name in names:
+            action = QAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            action.triggered.connect(lambda checked, n=name: self.profile_combo.setCurrentText(n))
+            self._tray_profiles_menu.addAction(action)
+
+    def _on_tray_import_profile(self):
+        self.show_window()
+        self._on_import_profile()
 
     # ── VPN action slots ──────────────────────────────────────────────────────
     def _on_status_changed(self, status: str):
