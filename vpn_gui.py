@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 OpenVPN3 GUI - PyQt5-based GUI and tray icon for openvpn3 CLI
-Profile: us-vpn0-tcp.ovpn (resolved relative to script at runtime)
+Profiles are stored in ~/.config/openvpn3-gui/profiles/
 """
 
 import sys
 import os
 import re
+import shutil
 import subprocess
 import threading
 from datetime import datetime
@@ -14,14 +15,13 @@ from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QSystemTrayIcon, QMenu, QAction,
-    QFrame, QSizePolicy, QMessageBox
+    QFrame, QSizePolicy, QMessageBox, QComboBox, QFileDialog
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
-from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor
+from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen
 
-OPENVPN3 = "/usr/bin/openvpn3"
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "us-vpn0-tcp.ovpn")
-CONFIG_NAME = os.path.splitext(os.path.basename(CONFIG_FILE))[0]
+OPENVPN3    = "/usr/bin/openvpn3"
+PROFILES_DIR = os.path.expanduser("~/.config/openvpn3-gui/profiles")
 
 # ── Status constants ──────────────────────────────────────────────────────────
 ST_DISCONNECTED = "Disconnected"
@@ -54,7 +54,6 @@ def make_tray_icon(status: str) -> QIcon:
     p.drawRoundedRect(5, 11, 12, 8, 2, 2)
     # lock shackle
     p.setBrush(Qt.NoBrush)
-    from PyQt5.QtGui import QPen
     pen = QPen(QColor("#ffffff"), 2)
     p.setPen(pen)
     p.drawArc(7, 6, 8, 8, 0, 180 * 16)
@@ -64,8 +63,8 @@ def make_tray_icon(status: str) -> QIcon:
 
 # ── Worker: runs openvpn3 commands in a thread ────────────────────────────────
 class Signals(QObject):
-    log        = pyqtSignal(str)
-    status     = pyqtSignal(str)
+    log          = pyqtSignal(str)
+    status       = pyqtSignal(str)
     session_path = pyqtSignal(str)
 
 
@@ -142,7 +141,6 @@ class StatusPoller(QObject):
         if "No sessions available" in text:
             return ST_DISCONNECTED, ""
 
-        # Extract session path
         path_match = re.search(r"(/net/openvpn/v3/sessions/\S+)", text)
         path = path_match.group(1) if path_match else ""
 
@@ -154,7 +152,6 @@ class StatusPoller(QObject):
         if "paused" in text_lower:
             return ST_PAUSED, path
 
-        # Has a session but unknown status → assume connecting
         if path:
             return ST_CONNECTING, path
         return ST_DISCONNECTED, ""
@@ -170,6 +167,8 @@ class VPNWindow(QMainWindow):
         self.signals = Signals()
         self.signals.log.connect(self._append_log)
 
+        os.makedirs(PROFILES_DIR, exist_ok=True)
+
         self._build_ui()
         self._build_tray()
         self._update_button_states()
@@ -180,13 +179,48 @@ class VPNWindow(QMainWindow):
         self.poller.log_line.connect(self._append_log)
         self.poller.start(3000)
 
-        self._append_log(f"OpenVPN3 GUI started — profile: {CONFIG_NAME}")
-        self._append_log(f"Config file: {CONFIG_FILE}")
+        self._append_log("OpenVPN3 GUI started")
+        self._append_log(f"Profiles directory: {PROFILES_DIR}")
+        if not self._profile_names():
+            self._append_log("[hint] No profiles found — use 'Import Profile' to add one.")
+
+    # ── Profile helpers ───────────────────────────────────────────────────────
+    def _profile_names(self) -> list[str]:
+        """Sorted list of profile names (stem of each .ovpn in PROFILES_DIR)."""
+        try:
+            return sorted(
+                os.path.splitext(f)[0]
+                for f in os.listdir(PROFILES_DIR)
+                if f.endswith(".ovpn")
+            )
+        except OSError:
+            return []
+
+    def _active_profile_name(self) -> str | None:
+        """Currently selected profile name (no extension), or None."""
+        return self.profile_combo.currentText() or None
+
+    def _active_profile_path(self) -> str | None:
+        """Full path to the selected .ovpn file, or None."""
+        name = self._active_profile_name()
+        return os.path.join(PROFILES_DIR, f"{name}.ovpn") if name else None
+
+    def _refresh_profiles(self):
+        """Reload profile combo from disk, preserving selection if possible."""
+        current = self.profile_combo.currentText()
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        names = self._profile_names()
+        self.profile_combo.addItems(names)
+        if current in names:
+            self.profile_combo.setCurrentText(current)
+        self.profile_combo.blockSignals(False)
+        self._on_profile_changed()
 
     # ── UI construction ───────────────────────────────────────────────────────
     def _build_ui(self):
         self.setWindowTitle("OpenVPN3")
-        self.setMinimumSize(540, 420)
+        self.setMinimumSize(560, 460)
         self.setWindowIcon(make_tray_icon(ST_DISCONNECTED))
 
         central = QWidget()
@@ -213,15 +247,50 @@ class VPNWindow(QMainWindow):
         self.status_label.setStyleSheet("color: #cccccc;")
         info_col.addWidget(self.status_label)
 
-        self.profile_label = QLabel(f"Profile: {CONFIG_NAME}")
-        self.profile_label.setStyleSheet("color: #888888; font-size: 11px;")
-        info_col.addWidget(self.profile_label)
+        self.active_profile_label = QLabel("No profile selected")
+        self.active_profile_label.setStyleSheet("color: #888888; font-size: 11px;")
+        info_col.addWidget(self.active_profile_label)
         sf_layout.addLayout(info_col)
         sf_layout.addStretch()
-
         root.addWidget(status_frame)
 
-        # ── Buttons ───────────────────────────────────────────────────────────
+        # ── Profile selector ──────────────────────────────────────────────────
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(6)
+
+        profile_lbl = QLabel("Profile:")
+        profile_lbl.setStyleSheet("color: #aaaaaa; font-size: 12px;")
+        profile_row.addWidget(profile_lbl)
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.profile_combo.setFixedHeight(30)
+        self.profile_combo.setStyleSheet(
+            "QComboBox { background: #1e1e1e; color: #cccccc; border: 1px solid #444; "
+            "border-radius: 4px; padding: 0 8px; }"
+            "QComboBox::drop-down { border: none; }"
+            "QComboBox QAbstractItemView { background: #1e1e1e; color: #cccccc; "
+            "selection-background-color: #333333; }"
+        )
+        self.profile_combo.addItems(self._profile_names())
+        self.profile_combo.currentTextChanged.connect(self._on_profile_changed)
+        profile_row.addWidget(self.profile_combo)
+
+        btn_import = QPushButton("Import…")
+        btn_import.setFixedHeight(30)
+        btn_import.setStyleSheet(self._btn_style("#1e88e5", "#1565c0"))
+        btn_import.clicked.connect(self._on_import_profile)
+        profile_row.addWidget(btn_import)
+
+        self.btn_remove = QPushButton("Remove")
+        self.btn_remove.setFixedHeight(30)
+        self.btn_remove.setStyleSheet(self._btn_style("#555555", "#333333"))
+        self.btn_remove.clicked.connect(self._on_remove_profile)
+        profile_row.addWidget(self.btn_remove)
+
+        root.addLayout(profile_row)
+
+        # ── Action buttons ────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
@@ -280,6 +349,9 @@ class VPNWindow(QMainWindow):
         btn_clear.clicked.connect(self.log_box.clear)
         root.addWidget(btn_clear, alignment=Qt.AlignRight)
 
+        # Initialise profile label
+        self._on_profile_changed()
+
     def _btn_style(self, bg, hover):
         return (
             f"QPushButton {{ background: {bg}; color: white; border: none; "
@@ -321,7 +393,58 @@ class VPNWindow(QMainWindow):
         self.tray.setContextMenu(menu)
         self.tray.show()
 
-    # ── Slots / event handlers ────────────────────────────────────────────────
+    # ── Profile slots ─────────────────────────────────────────────────────────
+    def _on_profile_changed(self):
+        name = self._active_profile_name()
+        if name:
+            self.active_profile_label.setText(f"Profile: {name}")
+        else:
+            self.active_profile_label.setText("No profile selected")
+        has_profile = name is not None
+        self.btn_remove.setEnabled(has_profile)
+        self._update_button_states()
+
+    def _on_import_profile(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import VPN Profile", os.path.expanduser("~"),
+            "OpenVPN Profiles (*.ovpn);;All Files (*)"
+        )
+        if not path:
+            return
+        dest = os.path.join(PROFILES_DIR, os.path.basename(path))
+        if os.path.exists(dest):
+            reply = QMessageBox.question(
+                self, "Overwrite?",
+                f"A profile named '{os.path.basename(path)}' already exists. Overwrite?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+        shutil.copy2(path, dest)
+        new_name = os.path.splitext(os.path.basename(path))[0]
+        self._append_log(f"[profile] Imported: {new_name}")
+        self._refresh_profiles()
+        self.profile_combo.setCurrentText(new_name)
+
+    def _on_remove_profile(self):
+        name = self._active_profile_name()
+        if not name:
+            return
+        reply = QMessageBox.question(
+            self, "Remove Profile",
+            f"Remove profile '{name}'? The file will be deleted.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            os.remove(os.path.join(PROFILES_DIR, f"{name}.ovpn"))
+            self._append_log(f"[profile] Removed: {name}")
+        except OSError as e:
+            self._append_log(f"[profile] Error removing {name}: {e}")
+        self._refresh_profiles()
+
+    # ── VPN action slots ──────────────────────────────────────────────────────
     def _on_status_changed(self, status: str):
         self._status = status
         color = STATUS_COLORS.get(status, "#888888")
@@ -339,8 +462,12 @@ class VPNWindow(QMainWindow):
     def _on_connect(self):
         if self._status in (ST_CONNECTED, ST_CONNECTING):
             return
-        self._append_log(f"[connect] Starting session with config file: {CONFIG_FILE}")
-        self._run_command([OPENVPN3, "session-start", "--config", CONFIG_FILE])
+        profile_path = self._active_profile_path()
+        if not profile_path:
+            QMessageBox.warning(self, "No Profile", "Select or import a VPN profile first.")
+            return
+        self._append_log(f"[connect] Starting session: {self._active_profile_name()}")
+        self._run_command([OPENVPN3, "session-start", "--config", profile_path])
 
     def _on_disconnect(self):
         if not self._session_path and self._status not in (ST_CONNECTED, ST_PAUSED, ST_CONNECTING):
@@ -350,7 +477,7 @@ class VPNWindow(QMainWindow):
         if self._session_path:
             cmd += ["--path", self._session_path]
         else:
-            cmd += ["--config", CONFIG_NAME]
+            cmd += ["--config", self._active_profile_name() or ""]
         self._run_command(cmd)
 
     def _on_pause(self):
@@ -361,7 +488,7 @@ class VPNWindow(QMainWindow):
         if self._session_path:
             cmd += ["--path", self._session_path]
         else:
-            cmd += ["--config", CONFIG_NAME]
+            cmd += ["--config", self._active_profile_name() or ""]
         self._run_command(cmd)
 
     def _on_resume(self):
@@ -372,7 +499,7 @@ class VPNWindow(QMainWindow):
         if self._session_path:
             cmd += ["--path", self._session_path]
         else:
-            cmd += ["--config", CONFIG_NAME]
+            cmd += ["--config", self._active_profile_name() or ""]
         self._run_command(cmd)
 
     def _on_stats(self):
@@ -381,7 +508,7 @@ class VPNWindow(QMainWindow):
         if self._session_path:
             cmd += ["--path", self._session_path]
         else:
-            cmd += ["--config", CONFIG_NAME]
+            cmd += ["--config", self._active_profile_name() or ""]
         self._run_command(cmd)
 
     def _run_command(self, cmd):
@@ -389,20 +516,21 @@ class VPNWindow(QMainWindow):
         worker = VPNWorker(cmd, self.signals)
         worker.finished.connect(lambda: self.poller.poll())
         worker.start()
-        self._worker = worker  # keep reference
+        self._worker = worker
 
     def _update_button_states(self):
-        connected  = self._status == ST_CONNECTED
-        paused     = self._status == ST_PAUSED
-        connecting = self._status == ST_CONNECTING
+        connected   = self._status == ST_CONNECTED
+        paused      = self._status == ST_PAUSED
+        connecting  = self._status == ST_CONNECTING
         has_session = connected or paused or connecting
+        has_profile = self._active_profile_name() is not None
 
-        self.btn_connect.setEnabled(not has_session)
+        self.btn_connect.setEnabled(not has_session and has_profile)
         self.btn_disconnect.setEnabled(has_session)
         self.btn_pause.setEnabled(connected)
         self.btn_resume.setEnabled(paused)
         self.btn_stats.setEnabled(connected or paused)
-        self._tray_connect_action.setEnabled(not has_session)
+        self._tray_connect_action.setEnabled(not has_session and has_profile)
         self._tray_disconnect_action.setEnabled(has_session)
 
     def _append_log(self, text: str):
@@ -437,11 +565,6 @@ class VPNWindow(QMainWindow):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main():
-    # Verify config file exists
-    if not os.path.exists(CONFIG_FILE):
-        print(f"ERROR: Config file not found: {CONFIG_FILE}", file=sys.stderr)
-        sys.exit(1)
-
     app = QApplication(sys.argv)
     app.setApplicationName("OpenVPN3 GUI")
     app.setQuitOnLastWindowClosed(False)
