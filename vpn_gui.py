@@ -225,7 +225,7 @@ class VPNWindow(QMainWindow):
         self.setWindowIcon(make_tray_icon(ST_DISCONNECTED))
 
         help_menu = self.menuBar().addMenu("Help")
-        about_action = QAction("About OpenVPN3 GUI", self)
+        about_action = QAction("About OpenVPN3 GUI", help_menu)
         about_action.triggered.connect(self._on_about)
         help_menu.addAction(about_action)
 
@@ -381,11 +381,11 @@ class VPNWindow(QMainWindow):
         menu.addAction(self._tray_status_action)
         menu.addSeparator()
 
-        self._tray_connect_action = QAction("Connect")
+        self._tray_connect_action = QAction("Connect", self)
         self._tray_connect_action.triggered.connect(self._on_connect)
         menu.addAction(self._tray_connect_action)
 
-        self._tray_disconnect_action = QAction("Disconnect")
+        self._tray_disconnect_action = QAction("Disconnect", self)
         self._tray_disconnect_action.triggered.connect(self._on_disconnect)
         self._tray_disconnect_action.setEnabled(False)
         menu.addAction(self._tray_disconnect_action)
@@ -394,21 +394,21 @@ class VPNWindow(QMainWindow):
         self._tray_profiles_menu = menu.addMenu("Profiles")
         self._rebuild_tray_profiles_menu()
 
-        tray_import_action = QAction("Import Profile…")
+        tray_import_action = QAction("Import Profile…", self)
         tray_import_action.triggered.connect(self._on_tray_import_profile)
         menu.addAction(tray_import_action)
 
         menu.addSeparator()
-        show_action = QAction("Show Window")
+        show_action = QAction("Show Window", self)
         show_action.triggered.connect(self.show_window)
         menu.addAction(show_action)
 
-        about_action = QAction(f"About  (v{APP_VERSION})")
+        about_action = QAction(f"About  (v{APP_VERSION})", self)
         about_action.triggered.connect(self._on_about)
         menu.addAction(about_action)
 
         menu.addSeparator()
-        quit_action = QAction("Quit")
+        quit_action = QAction("Quit", self)
         quit_action.triggered.connect(self._on_quit)
         menu.addAction(quit_action)
 
@@ -472,12 +472,12 @@ class VPNWindow(QMainWindow):
         names = self._profile_names()
         current = self._active_profile_name()
         if not names:
-            empty = QAction("No profiles imported")
+            empty = QAction("No profiles imported", self._tray_profiles_menu)
             empty.setEnabled(False)
             self._tray_profiles_menu.addAction(empty)
             return
         for name in names:
-            action = QAction(name)
+            action = QAction(name, self._tray_profiles_menu)
             action.setCheckable(True)
             action.setChecked(name == current)
             action.triggered.connect(lambda checked, n=name: self.profile_combo.setCurrentText(n))
