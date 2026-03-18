@@ -2,6 +2,12 @@
 
 A PyQt5 desktop client and system tray icon for the [`openvpn3`](https://github.com/OpenVPN/openvpn3-linux) CLI. Supports multiple profiles, session management, and runs persistently in the system tray.
 
+## Screenshots
+
+| Main window | Tray menu |
+|:-----------:|:---------:|
+| ![Main window](screenshots/main_window.png) | ![Tray menu](screenshots/tray_menu.png) |
+
 ## Features
 
 - System tray icon with colour-coded connection status
