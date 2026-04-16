@@ -70,7 +70,7 @@ openvpn3-gui/
 Current version is defined in `vpn_gui.py`:
 
 ```python
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 ```
 
 Bump this before running `install.sh` to publish an upgrade.
