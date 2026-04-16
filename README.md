@@ -26,7 +26,7 @@ A PyQt5 desktop client and system tray icon for the [`openvpn3`](https://github.
 ## Installation
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/invaliddev403/openvpn3-gui
 cd openvpn3-gui
 ./install.sh
 ```
