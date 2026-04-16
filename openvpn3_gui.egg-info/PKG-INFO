@@ -1,3 +1,12 @@
+Metadata-Version: 2.4
+Name: openvpn3-gui
+Version: 1.2.0
+Summary: A PyQt5 desktop client and tray icon for the openvpn3 CLI
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: PyQt5>=5.15.0
+Requires-Dist: pexpect>=4.8.0
+
 # OpenVPN3 GUI
 
 A PyQt5 desktop client and system tray icon for the [`openvpn3`](https://github.com/OpenVPN/openvpn3-linux) CLI. Supports multiple profiles, session management, and runs persistently in the system tray.

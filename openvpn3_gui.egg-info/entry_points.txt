@@ -1,0 +1,2 @@
+[console_scripts]
+openvpn3-gui = vpn_gui:main

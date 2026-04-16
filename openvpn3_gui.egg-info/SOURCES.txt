@@ -1,0 +1,9 @@
+README.md
+pyproject.toml
+vpn_gui.py
+openvpn3_gui.egg-info/PKG-INFO
+openvpn3_gui.egg-info/SOURCES.txt
+openvpn3_gui.egg-info/dependency_links.txt
+openvpn3_gui.egg-info/entry_points.txt
+openvpn3_gui.egg-info/requires.txt
+openvpn3_gui.egg-info/top_level.txt

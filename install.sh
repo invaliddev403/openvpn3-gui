@@ -3,29 +3,42 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-INSTALL_DIR="$HOME/.local/lib/openvpn3-gui"
-BIN_DIR="$HOME/.local/bin"
+# Define paths
+OLD_INSTALL_DIR="$HOME/.local/lib/openvpn3-gui"
+OLD_BIN_PATH="$HOME/.local/bin/openvpn3-gui"
 DESKTOP_DIR="$HOME/.local/share/applications"
 PROFILES_DIR="$HOME/.config/openvpn3-gui/profiles"
 
-# Extract version from the source file
-NEW_VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$SCRIPT_DIR/vpn_gui.py")
-
-# Detect existing install and its version
-if [ -f "$INSTALL_DIR/vpn_gui.py" ]; then
-    OLD_VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$INSTALL_DIR/vpn_gui.py" 2>/dev/null || echo "unknown")
-    echo "Upgrading OpenVPN3 GUI: v$OLD_VERSION → v$NEW_VERSION"
-else
-    echo "Installing OpenVPN3 GUI v$NEW_VERSION"
+# Check for dependencies
+if ! command -v pipx &> /dev/null; then
+    echo "Error: pipx is not installed. Please install pipx first (e.g., sudo apt install pipx)."
+    exit 1
 fi
 
-mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" "$PROFILES_DIR"
+if ! command -v openvpn3 &> /dev/null; then
+    echo "Warning: openvpn3 is not installed or not in PATH."
+fi
 
-# Always overwrite the application (upgrade)
-cp "$SCRIPT_DIR/vpn_gui.py" "$INSTALL_DIR/"
-chmod +x "$INSTALL_DIR/vpn_gui.py"
+# Clean up older installation if it exists
+if [ -d "$OLD_INSTALL_DIR" ] || [ -f "$OLD_BIN_PATH" ]; then
+    echo "Cleaning up legacy installation..."
+    rm -rf "$OLD_INSTALL_DIR"
+    rm -f "$OLD_BIN_PATH"
+fi
 
-# Copy any bundled .ovpn profiles — never overwrite existing user profiles
+# Extract version from vpn_gui.py
+VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$SCRIPT_DIR/vpn_gui.py")
+echo "Installing OpenVPN3 GUI v$VERSION via pipx..."
+
+# Use pipx to install the current directory
+pipx install --force "$SCRIPT_DIR"
+
+# Ensure directories exist with proper permissions
+mkdir -p "$DESKTOP_DIR"
+mkdir -p "$PROFILES_DIR"
+chmod 700 "$PROFILES_DIR"
+
+# Copy bundled profiles if any
 for ovpn in "$SCRIPT_DIR"/*.ovpn; do
     [ -f "$ovpn" ] || continue
     dest="$PROFILES_DIR/$(basename "$ovpn")"
@@ -33,26 +46,21 @@ for ovpn in "$SCRIPT_DIR"/*.ovpn; do
         echo "  Skipping profile $(basename "$ovpn") (already exists)"
     else
         cp "$ovpn" "$dest"
+        chmod 600 "$dest"
         echo "  Installed profile: $(basename "$ovpn")"
     fi
 done
 
-# Always overwrite the launcher
-cat > "$BIN_DIR/openvpn3-gui" <<EOF
-#!/usr/bin/env bash
-exec python3 "$INSTALL_DIR/vpn_gui.py" "\$@"
-EOF
-chmod +x "$BIN_DIR/openvpn3-gui"
-
-# Always overwrite the desktop entry
-sed "s|%h|$HOME|g" "$SCRIPT_DIR/openvpn3-gui.desktop" > "$DESKTOP_DIR/openvpn3-gui.desktop"
-update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+# Update desktop entry
+if [ -f "$SCRIPT_DIR/openvpn3-gui.desktop" ]; then
+    echo "Installing desktop entry..."
+    sed "s|%h|$HOME|g" "$SCRIPT_DIR/openvpn3-gui.desktop" > "$DESKTOP_DIR/openvpn3-gui.desktop"
+    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+fi
 
 echo ""
-echo "Done. v$NEW_VERSION installed."
-echo "  App:      $INSTALL_DIR/vpn_gui.py"
+echo "Done. v$VERSION installed."
+echo "  App:      ~/.local/bin/openvpn3-gui"
 echo "  Profiles: $PROFILES_DIR/"
-echo "  Launcher: $BIN_DIR/openvpn3-gui"
-echo "  Desktop:  $DESKTOP_DIR/openvpn3-gui.desktop"
 echo ""
-echo "Make sure $BIN_DIR is in your PATH, then run: openvpn3-gui"
+echo "Run with: openvpn3-gui"
