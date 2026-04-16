@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import threading
 import stat
+import html
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
@@ -22,7 +23,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QUrl
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen, QDesktopServices
 
-APP_VERSION  = "1.2.3"
+APP_VERSION  = "1.2.4"
 OPENVPN3     = shutil.which("openvpn3") or "/usr/bin/openvpn3"
 PROFILES_DIR = os.path.expanduser("~/.config/openvpn3-gui/profiles")
 PID_FILE     = os.path.expanduser("~/.config/openvpn3-gui/app.pid")
@@ -750,7 +751,7 @@ class VPNWindow(QMainWindow):
 
     def _append_log(self, text: str):
         ts = datetime.now().strftime("%H:%M:%S")
-        self.log_box.append(f"<span style='color:#555555'>[{ts}]</span> {text}")
+        self.log_box.append(f"<span style='color:#555555'>[{ts}]</span> {html.escape(text)}")
         self.log_box.moveCursor(QTextCursor.End)
 
     # ── Tray / window visibility ──────────────────────────────────────────────
