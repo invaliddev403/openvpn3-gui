@@ -1,11 +1,10 @@
 Metadata-Version: 2.4
 Name: openvpn3-gui
-Version: 1.2.0
+Version: 1.2.3
 Summary: A PyQt5 desktop client and tray icon for the openvpn3 CLI
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
 Requires-Dist: PyQt5>=5.15.0
-Requires-Dist: pexpect>=4.8.0
 
 # OpenVPN3 GUI
 
@@ -79,7 +78,7 @@ openvpn3-gui/
 Current version is defined in `vpn_gui.py`:
 
 ```python
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 ```
 
 Bump this before running `install.sh` to publish an upgrade.

@@ -4,13 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "openvpn3-gui"
-version = "1.2.0"
+version = "1.2.3"
 description = "A PyQt5 desktop client and tray icon for the openvpn3 CLI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "PyQt5>=5.15.0",
-    "pexpect>=4.8.0"
+    "PyQt5>=5.15.0"
 ]
 
 [project.scripts]

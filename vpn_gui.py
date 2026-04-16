@@ -13,17 +13,16 @@ import threading
 import stat
 from datetime import datetime
 
-import pexpect
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QTextEdit, QSystemTrayIcon, QMenu, QAction,
     QFrame, QSizePolicy, QMessageBox, QComboBox, QFileDialog, QInputDialog,
     QLineEdit
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread
-from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QUrl
+from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen, QDesktopServices
 
-APP_VERSION  = "1.2.0"
+APP_VERSION  = "1.2.3"
 OPENVPN3     = shutil.which("openvpn3") or "/usr/bin/openvpn3"
 PROFILES_DIR = os.path.expanduser("~/.config/openvpn3-gui/profiles")
 PID_FILE     = os.path.expanduser("~/.config/openvpn3-gui/app.pid")
@@ -34,6 +33,7 @@ ST_CONNECTING   = "Connecting…"
 ST_CONNECTED    = "Connected"
 ST_PAUSED       = "Paused"
 ST_ERROR        = "Error"
+ST_AWAITING_AUTH = "Awaiting Auth"
 
 STATUS_COLORS = {
     ST_DISCONNECTED: "#888888",
@@ -41,6 +41,7 @@ STATUS_COLORS = {
     ST_CONNECTED:    "#00c853",
     ST_PAUSED:       "#f0a500",
     ST_ERROR:        "#e53935",
+    ST_AWAITING_AUTH: "#f0a500",
 }
 
 
@@ -71,7 +72,7 @@ class Signals(QObject):
     log          = pyqtSignal(str)
     status       = pyqtSignal(str)
     session_path = pyqtSignal(str)
-    auth_request = pyqtSignal(str)  # emits prompt text
+    url_found    = pyqtSignal(str)  # emits URL
 
 
 class VPNWorker(QThread):
@@ -83,65 +84,29 @@ class VPNWorker(QThread):
         self.signals = signals
         self.capture = capture
         self.output_lines: list[str] = []
-        self._auth_event = threading.Event()
-        self._auth_response: str | None = None
-
-    def provide_auth(self, response: str | None):
-        self._auth_response = response
-        self._auth_event.set()
 
     def run(self):
         try:
-            # Join the list into a single command string for pexpect
-            # or pass the executable and args separately.
-            child = pexpect.spawn(self.cmd[0], self.cmd[1:], encoding='utf-8', timeout=None)
-            
-            # Common patterns for openvpn3 prompts and logs
-            patterns = [
-                r'(?i)Auth User name:\s*',
-                r'(?i)Auth Password:\s*',
-                r'(?i)Enter .* passphrase:\s*',
-                r'(?i)Enter .* Password:\s*',
-                r'(?i)username:\s*',
-                r'(?i)password:\s*',
-                r'\r\n',
-            ]
-
-            while True:
-                index = child.expect(patterns + [pexpect.EOF, pexpect.TIMEOUT])
-                
-                if index < 6:
-                    # It's an interactive prompt
-                    prompt = child.match.group(0).strip()
-                    self._auth_event.clear()
-                    self.signals.auth_request.emit(prompt)
-                    self._auth_event.wait()
+            proc = subprocess.Popen(
+                self.cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    self.signals.log.emit(line)
                     
-                    if self._auth_response is None:
-                        # User cancelled the dialog
-                        child.terminate(force=True)
-                        break
+                    # Detect URLs for web auth
+                    urls = re.findall(r'https?://[^\s\r\n]+', line)
+                    for url in urls:
+                        self.signals.url_found.emit(url)
                     
-                    child.sendline(self._auth_response)
-                    self._auth_response = None
-                elif index == 6:
-                    # It's a log line (newline reached)
-                    line = child.before.strip()
-                    if line:
-                        self.signals.log.emit(line)
-                        if self.capture:
-                            self.output_lines.append(line)
-                elif index == 7:
-                    # EOF
-                    line = child.before.strip()
-                    if line:
-                        self.signals.log.emit(line)
-                    break
-                else:
-                    # Timeout (should not happen with timeout=None)
-                    break
-            
-            child.close()
+                    if self.capture:
+                        self.output_lines.append(line)
+            proc.wait()
         except Exception as e:
             self.signals.log.emit(f"[error] {e}")
 
@@ -195,6 +160,16 @@ class StatusPoller(QObject):
         text_lower = text.lower()
         if "connected" in text_lower:
             return ST_CONNECTED, path
+        
+        # Check for web auth / external auth states specifically
+        if any(s in text_lower for s in (
+            "awaiting external authentication", 
+            "web based authentication",
+            "await_auth",
+            "await_web_auth"
+        )):
+            return ST_AWAITING_AUTH, path
+            
         if "connecting" in text_lower or "get config" in text_lower:
             return ST_CONNECTING, path
         if "paused" in text_lower:
@@ -211,10 +186,11 @@ class VPNWindow(QMainWindow):
         super().__init__()
         self._session_path = ""
         self._status = ST_DISCONNECTED
+        self._auth_url = ""
         self._worker: VPNWorker | None = None
         self.signals = Signals()
         self.signals.log.connect(self._append_log)
-        self.signals.auth_request.connect(self._on_auth_request)
+        self.signals.url_found.connect(self._on_url_found)
 
         os.makedirs(PROFILES_DIR, exist_ok=True)
 
@@ -380,6 +356,27 @@ class VPNWindow(QMainWindow):
         sf_layout.addLayout(info_col)
         sf_layout.addStretch()
         root.addWidget(status_frame)
+
+        # ── Auth URL bar (hidden by default) ──────────────────────────────────
+        self.auth_url_frame = QFrame()
+        self.auth_url_frame.setFixedHeight(40)
+        self.auth_url_frame.setStyleSheet("QFrame { background: #333333; border-radius: 4px; }")
+        auf_layout = QHBoxLayout(self.auth_url_frame)
+        auf_layout.setContentsMargins(10, 0, 10, 0)
+
+        auf_lbl = QLabel("Action Required: Web Authentication")
+        auf_lbl.setStyleSheet("color: #f0a500; font-size: 11px; font-weight: bold;")
+        auf_layout.addWidget(auf_lbl)
+        auf_layout.addStretch()
+
+        btn_open = QPushButton("Open Browser")
+        btn_open.setFixedHeight(24)
+        btn_open.setStyleSheet(self._btn_style("#f0a500", "#c07800"))
+        btn_open.clicked.connect(self._on_open_auth_url)
+        auf_layout.addWidget(btn_open)
+
+        self.auth_url_frame.setVisible(False)
+        root.addWidget(self.auth_url_frame)
 
         # ── Profile selector ──────────────────────────────────────────────────
         profile_row = QHBoxLayout()
@@ -609,16 +606,18 @@ class VPNWindow(QMainWindow):
         self.show_window()
         self._on_import_profile()
 
-    def _on_auth_request(self, prompt: str):
-        """Show an input dialog to handle pexpect authentication prompts."""
-        is_password = any(s in prompt.lower() for s in ("password", "passphrase"))
-        title = "Authentication Required"
-        text, ok = QInputDialog.getText(
-            self, title, prompt,
-            QLineEdit.Password if is_password else QLineEdit.Normal
+    def _on_url_found(self, url: str):
+        self._auth_url = url
+        self.auth_url_frame.setVisible(True)
+        self.tray.showMessage(
+            "OpenVPN3 Authentication",
+            "Web-based authentication required. Click 'Open Browser' in the window.",
+            QSystemTrayIcon.Information, 5000
         )
-        if self._worker:
-            self._worker.provide_auth(text if ok else None)
+
+    def _on_open_auth_url(self):
+        if self._auth_url:
+            QDesktopServices.openUrl(QUrl(self._auth_url))
 
     # ── VPN action slots ──────────────────────────────────────────────────────
     def _on_status_changed(self, status: str):
@@ -632,12 +631,52 @@ class VPNWindow(QMainWindow):
         self._update_button_states()
         self._append_log(f"[status] {status}")
 
+        if status == ST_AWAITING_AUTH:
+            if not self._auth_url:
+                self._poll_for_auth_url()
+        elif status not in (ST_CONNECTING,):
+            self.auth_url_frame.setVisible(False)
+            self._auth_url = ""
+
+    def _poll_for_auth_url(self):
+        """Try to fetch the auth URL using the CLI if it hasn't appeared in logs."""
+        self._append_log("[auth] Checking for authentication URL via session-auth…")
+        try:
+            # First, check if session-auth lists a URL
+            result = subprocess.run(
+                [OPENVPN3, "session-auth", "--list"],
+                capture_output=True, text=True, timeout=3
+            )
+            urls = re.findall(r'https?://[^\s\r\n]+', result.stdout)
+            if urls:
+                self._append_log(f"[auth] Found URL in session-auth: {urls[0]}")
+                self._on_url_found(urls[0])
+                return
+
+            # If not, check if session-manage can reveal it for our current session
+            if self._session_path:
+                result = subprocess.run(
+                    [OPENVPN3, "session-manage", "--path", self._session_path, "--show-auth-url"],
+                    capture_output=True, text=True, timeout=3
+                )
+                urls = re.findall(r'https?://[^\s\r\n]+', result.stdout)
+                if urls:
+                    self._append_log(f"[auth] Found URL in session-manage: {urls[0]}")
+                    self._on_url_found(urls[0])
+                    return
+            
+            self._append_log("[auth] No URL found yet — checking again in a few seconds.")
+        except Exception as e:
+            self._append_log(f"[auth] Could not fetch URL: {e}")
+
     def _on_session_changed(self, path: str):
         self._session_path = path
 
     def _on_connect(self):
-        if self._status in (ST_CONNECTED, ST_CONNECTING):
+        if self._status in (ST_CONNECTED, ST_CONNECTING, ST_AWAITING_AUTH):
             return
+        self._auth_url = ""
+        self.auth_url_frame.setVisible(False)
         profile_path = self._active_profile_path()
         if not profile_path:
             QMessageBox.warning(self, "No Profile", "Select or import a VPN profile first.")
@@ -690,7 +729,6 @@ class VPNWindow(QMainWindow):
     def _run_command(self, cmd):
         self._append_log(f"$ {' '.join(cmd)}")
         worker = VPNWorker(cmd, self.signals)
-        worker.signals.auth_request.connect(self._on_auth_request)
         worker.finished.connect(lambda: self.poller.poll())
         worker.start()
         self._worker = worker
@@ -698,7 +736,7 @@ class VPNWindow(QMainWindow):
     def _update_button_states(self):
         connected   = self._status == ST_CONNECTED
         paused      = self._status == ST_PAUSED
-        connecting  = self._status == ST_CONNECTING
+        connecting  = self._status == ST_CONNECTING or self._status == ST_AWAITING_AUTH
         has_session = connected or paused or connecting
         has_profile = self._active_profile_name() is not None
 
