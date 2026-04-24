@@ -28,7 +28,7 @@ fi
 
 # Extract version from vpn_gui.py
 VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$SCRIPT_DIR/vpn_gui.py")
-echo "Installing OpenVPN3 GUI v$VERSION via pipx..."
+echo "Installing OpenVPN3 GUI + CLI v$VERSION via pipx..."
 
 # Use pipx to install the current directory
 pipx install --force "$SCRIPT_DIR"
@@ -60,7 +60,9 @@ fi
 
 echo ""
 echo "Done. v$VERSION installed."
-echo "  App:      ~/.local/bin/openvpn3-gui"
+echo "  GUI:      ~/.local/bin/openvpn3-gui"
+echo "  CLI:      ~/.local/bin/openvpn3-cli"
 echo "  Profiles: $PROFILES_DIR/"
 echo ""
-echo "Run with: openvpn3-gui"
+echo "Launch the GUI:    openvpn3-gui"
+echo "Use the CLI:       openvpn3-cli --help"

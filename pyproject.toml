@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 openvpn3-gui = "vpn_gui:main"
+openvpn3-cli = "vpn_cli:main"
 
 [tool.setuptools]
-py-modules = ["vpn_gui"]
+py-modules = ["vpn_gui", "vpn_cli"]

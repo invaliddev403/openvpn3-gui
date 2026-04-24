@@ -1,5 +1,6 @@
 README.md
 pyproject.toml
+vpn_cli.py
 vpn_gui.py
 openvpn3_gui.egg-info/PKG-INFO
 openvpn3_gui.egg-info/SOURCES.txt
