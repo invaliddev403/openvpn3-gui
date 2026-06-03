@@ -239,6 +239,7 @@ class VPNWindow(QMainWindow):
 
         self._kill_orphaned_instances()
         self._cleanup_orphaned_sessions()
+        self._ensure_autostart_current()
 
         self.poller = StatusPoller()
         self.poller.status_changed.connect(self._on_status_changed)
@@ -823,6 +824,28 @@ class VPNWindow(QMainWindow):
         self.log_box.moveCursor(QTextCursor.End)
 
     # ── Autostart ─────────────────────────────────────────────────────────────
+    def _ensure_autostart_current(self):
+        """Silently rewrite the autostart file if it exists but lacks --minimized."""
+        if not os.path.isfile(AUTOSTART_FILE):
+            return
+        expected_exec = _autostart_exec()
+        try:
+            with open(AUTOSTART_FILE) as f:
+                content = f.read()
+            if f"Exec={expected_exec}" in content:
+                return
+            with open(AUTOSTART_FILE, "w") as f:
+                f.write(
+                    "[Desktop Entry]\n"
+                    "Name=OpenVPN3 GUI\n"
+                    f"Exec={expected_exec}\n"
+                    "Type=Application\n"
+                    "X-GNOME-Autostart-enabled=true\n"
+                )
+            self._append_log("[settings] Updated autostart entry to include --minimized.")
+        except OSError as e:
+            self._append_log(f"[settings] Could not refresh autostart file: {e}")
+
     def _set_autostart(self, enabled: bool):
         if enabled:
             os.makedirs(AUTOSTART_DIR, exist_ok=True)

@@ -58,6 +58,20 @@ if [ -f "$SCRIPT_DIR/openvpn3-gui.desktop" ]; then
     update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
 fi
 
+# Fix autostart file if it exists but is missing --minimized
+AUTOSTART_FILE="$HOME/.config/autostart/openvpn3-gui.desktop"
+EXEC_LINE="Exec=$HOME/.local/bin/openvpn3-gui --minimized"
+if [ -f "$AUTOSTART_FILE" ] && ! grep -qF "$EXEC_LINE" "$AUTOSTART_FILE"; then
+    echo "Updating autostart entry to include --minimized..."
+    cat > "$AUTOSTART_FILE" <<EOF
+[Desktop Entry]
+Name=OpenVPN3 GUI
+Exec=$HOME/.local/bin/openvpn3-gui --minimized
+Type=Application
+X-GNOME-Autostart-enabled=true
+EOF
+fi
+
 echo ""
 echo "Done. v$VERSION installed."
 echo "  GUI:      ~/.local/bin/openvpn3-gui"

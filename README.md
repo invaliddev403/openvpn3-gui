@@ -39,6 +39,7 @@ The installer:
 - Installs the app via `pipx` (creates an isolated environment and adds both `openvpn3-gui` and `openvpn3-cli` to your `PATH`)
 - Installs a `.desktop` entry for app launchers
 - Copies any bundled `.ovpn` files into the profiles directory with secure permissions
+- Fixes the autostart entry (`~/.config/autostart/openvpn3-gui.desktop`) if it exists but is missing the `--minimized` flag
 
 Make sure `~/.local/bin` is in your `PATH`, then launch the GUI:
 
