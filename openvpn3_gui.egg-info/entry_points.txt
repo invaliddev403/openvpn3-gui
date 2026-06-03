@@ -1,3 +1,0 @@
-[console_scripts]
-openvpn3-cli = vpn_cli:main
-openvpn3-gui = vpn_gui:main

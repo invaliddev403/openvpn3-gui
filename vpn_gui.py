@@ -23,10 +23,12 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QUrl
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen, QDesktopServices
 
-APP_VERSION  = "1.2.4"
-OPENVPN3     = shutil.which("openvpn3") or "/usr/bin/openvpn3"
-PROFILES_DIR = os.path.expanduser("~/.config/openvpn3-gui/profiles")
-PID_FILE     = os.path.expanduser("~/.config/openvpn3-gui/app.pid")
+APP_VERSION    = "1.2.5"
+OPENVPN3       = shutil.which("openvpn3") or "/usr/bin/openvpn3"
+PROFILES_DIR   = os.path.expanduser("~/.config/openvpn3-gui/profiles")
+PID_FILE       = os.path.expanduser("~/.config/openvpn3-gui/app.pid")
+AUTOSTART_DIR  = os.path.expanduser("~/.config/autostart")
+AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/openvpn3-gui.desktop")
 
 # ── Status constants ──────────────────────────────────────────────────────────
 ST_DISCONNECTED = "Disconnected"
@@ -44,6 +46,19 @@ STATUS_COLORS = {
     ST_ERROR:        "#e53935",
     ST_AWAITING_AUTH: "#f0a500",
 }
+
+
+# ── Autostart helpers ─────────────────────────────────────────────────────────
+def _autostart_exec() -> str:
+    """Return the Exec= path to embed in the autostart desktop entry."""
+    found = shutil.which("openvpn3-gui")
+    if found:
+        return found
+    return f"{sys.executable} {os.path.abspath(sys.argv[0])}"
+
+
+def _is_autostart_enabled() -> bool:
+    return os.path.isfile(AUTOSTART_FILE)
 
 
 # ── Tray icon drawing ─────────────────────────────────────────────────────────
@@ -322,6 +337,13 @@ class VPNWindow(QMainWindow):
         self.setMinimumSize(560, 460)
         self.setWindowIcon(make_tray_icon(ST_DISCONNECTED))
 
+        settings_menu = self.menuBar().addMenu("Settings")
+        self._menubar_autostart_action = QAction("Start on Login", settings_menu)
+        self._menubar_autostart_action.setCheckable(True)
+        self._menubar_autostart_action.setChecked(_is_autostart_enabled())
+        self._menubar_autostart_action.triggered.connect(self._on_toggle_autostart)
+        settings_menu.addAction(self._menubar_autostart_action)
+
         help_menu = self.menuBar().addMenu("Help")
         about_action = QAction("About OpenVPN3 GUI", help_menu)
         about_action.triggered.connect(self._on_about)
@@ -516,6 +538,13 @@ class VPNWindow(QMainWindow):
         tray_import_action = QAction("Import Profile…", self)
         tray_import_action.triggered.connect(self._on_tray_import_profile)
         menu.addAction(tray_import_action)
+
+        menu.addSeparator()
+        self._tray_autostart_action = QAction("Start on Login", self)
+        self._tray_autostart_action.setCheckable(True)
+        self._tray_autostart_action.setChecked(_is_autostart_enabled())
+        self._tray_autostart_action.triggered.connect(self._on_toggle_autostart)
+        menu.addAction(self._tray_autostart_action)
 
         menu.addSeparator()
         show_action = QAction("Show Window", self)
@@ -753,6 +782,41 @@ class VPNWindow(QMainWindow):
         ts = datetime.now().strftime("%H:%M:%S")
         self.log_box.append(f"<span style='color:#555555'>[{ts}]</span> {html.escape(text)}")
         self.log_box.moveCursor(QTextCursor.End)
+
+    # ── Autostart ─────────────────────────────────────────────────────────────
+    def _set_autostart(self, enabled: bool):
+        if enabled:
+            os.makedirs(AUTOSTART_DIR, exist_ok=True)
+            content = (
+                "[Desktop Entry]\n"
+                "Name=OpenVPN3 GUI\n"
+                f"Exec={_autostart_exec()}\n"
+                "Type=Application\n"
+                "X-GNOME-Autostart-enabled=true\n"
+            )
+            try:
+                with open(AUTOSTART_FILE, "w") as f:
+                    f.write(content)
+                self._append_log("[settings] Autostart enabled — will start on login.")
+            except OSError as e:
+                self._append_log(f"[settings] Could not write autostart file: {e}")
+                return
+        else:
+            try:
+                os.remove(AUTOSTART_FILE)
+                self._append_log("[settings] Autostart disabled.")
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                self._append_log(f"[settings] Could not remove autostart file: {e}")
+                return
+
+        self._tray_autostart_action.setChecked(enabled)
+        self._menubar_autostart_action.setChecked(enabled)
+
+    def _on_toggle_autostart(self):
+        sender = self.sender()
+        self._set_autostart(sender.isChecked())
 
     # ── Tray / window visibility ──────────────────────────────────────────────
     def _on_tray_activated(self, reason):

@@ -1,2 +1,0 @@
-vpn_cli
-vpn_gui
