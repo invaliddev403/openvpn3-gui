@@ -16,7 +16,8 @@ A PyQt5 desktop client and system tray icon for the [`openvpn3`](https://github.
 - View live session statistics
 - Minimises to tray on close; right-click to quit
 - Cleans up orphaned sessions and stale app instances on startup
-- **Start on Login** — toggle autostart via tray menu or Settings menu bar
+- **Start on Login** — toggle autostart via tray menu or Settings menu bar; launches straight to tray
+- **Connect on Login** — auto-connect to a saved profile on boot (enable via Settings or tray menu)
 - **CLI (`openvpn3-cli`)** for headless, scripted, or terminal-first use
 
 ## Requirements
@@ -121,5 +122,5 @@ openvpn3-gui/
 Current version is defined in `vpn_gui.py`:
 
 ```python
-APP_VERSION = "1.2.5"
+APP_VERSION = "1.3.0"
 ```

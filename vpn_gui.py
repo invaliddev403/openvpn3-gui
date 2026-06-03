@@ -7,6 +7,7 @@ Profiles are stored in ~/.config/openvpn3-gui/profiles/
 import sys
 import os
 import re
+import json
 import shutil
 import subprocess
 import threading
@@ -23,9 +24,11 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QThread, QUrl
 from PyQt5.QtGui import QIcon, QColor, QPainter, QPixmap, QFont, QTextCursor, QPen, QDesktopServices
 
-APP_VERSION    = "1.2.5"
+APP_VERSION    = "1.3.0"
 OPENVPN3       = shutil.which("openvpn3") or "/usr/bin/openvpn3"
+CONFIG_DIR     = os.path.expanduser("~/.config/openvpn3-gui")
 PROFILES_DIR   = os.path.expanduser("~/.config/openvpn3-gui/profiles")
+CONFIG_FILE    = os.path.expanduser("~/.config/openvpn3-gui/settings.json")
 PID_FILE       = os.path.expanduser("~/.config/openvpn3-gui/app.pid")
 AUTOSTART_DIR  = os.path.expanduser("~/.config/autostart")
 AUTOSTART_FILE = os.path.expanduser("~/.config/autostart/openvpn3-gui.desktop")
@@ -48,13 +51,28 @@ STATUS_COLORS = {
 }
 
 
+# ── Settings helpers ──────────────────────────────────────────────────────────
+def _load_settings() -> dict:
+    try:
+        with open(CONFIG_FILE) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_settings(data: dict):
+    os.makedirs(CONFIG_DIR, exist_ok=True)
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
 # ── Autostart helpers ─────────────────────────────────────────────────────────
 def _autostart_exec() -> str:
     """Return the Exec= path to embed in the autostart desktop entry."""
     found = shutil.which("openvpn3-gui")
     if found:
-        return found
-    return f"{sys.executable} {os.path.abspath(sys.argv[0])}"
+        return f"{found} --minimized"
+    return f"{sys.executable} {os.path.abspath(sys.argv[0])} --minimized"
 
 
 def _is_autostart_enabled() -> bool:
@@ -198,7 +216,7 @@ class StatusPoller(QObject):
 
 # ── Main Window ───────────────────────────────────────────────────────────────
 class VPNWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, start_minimized=False):
         super().__init__()
         self._session_path = ""
         self._status = ST_DISCONNECTED
@@ -227,6 +245,11 @@ class VPNWindow(QMainWindow):
         self.poller.session_changed.connect(self._on_session_changed)
         self.poller.log_line.connect(self._append_log)
         self.poller.start(3000)
+
+        if start_minimized:
+            autoconnect = _load_settings().get("autoconnect_profile", "")
+            if autoconnect:
+                QTimer.singleShot(3000, self._autoconnect_on_boot)
 
     # ── Startup cleanup ───────────────────────────────────────────────────────
     def _kill_orphaned_instances(self):
@@ -343,6 +366,14 @@ class VPNWindow(QMainWindow):
         self._menubar_autostart_action.setChecked(_is_autostart_enabled())
         self._menubar_autostart_action.triggered.connect(self._on_toggle_autostart)
         settings_menu.addAction(self._menubar_autostart_action)
+
+        self._menubar_autoconnect_action = QAction("Connect on Login", settings_menu)
+        self._menubar_autoconnect_action.setCheckable(True)
+        self._menubar_autoconnect_action.setChecked(
+            bool(_load_settings().get("autoconnect_profile", ""))
+        )
+        self._menubar_autoconnect_action.triggered.connect(self._on_toggle_autoconnect)
+        settings_menu.addAction(self._menubar_autoconnect_action)
 
         help_menu = self.menuBar().addMenu("Help")
         about_action = QAction("About OpenVPN3 GUI", help_menu)
@@ -545,6 +576,14 @@ class VPNWindow(QMainWindow):
         self._tray_autostart_action.setChecked(_is_autostart_enabled())
         self._tray_autostart_action.triggered.connect(self._on_toggle_autostart)
         menu.addAction(self._tray_autostart_action)
+
+        self._tray_autoconnect_action = QAction("Connect on Login", self)
+        self._tray_autoconnect_action.setCheckable(True)
+        self._tray_autoconnect_action.setChecked(
+            bool(_load_settings().get("autoconnect_profile", ""))
+        )
+        self._tray_autoconnect_action.triggered.connect(self._on_toggle_autoconnect)
+        menu.addAction(self._tray_autoconnect_action)
 
         menu.addSeparator()
         show_action = QAction("Show Window", self)
@@ -818,6 +857,45 @@ class VPNWindow(QMainWindow):
         sender = self.sender()
         self._set_autostart(sender.isChecked())
 
+    # ── Autoconnect ───────────────────────────────────────────────────────────
+    def _set_autoconnect(self, enabled: bool):
+        settings = _load_settings()
+        if enabled:
+            profile = self._active_profile_name()
+            if not profile:
+                QMessageBox.warning(
+                    self, "No Profile Selected",
+                    "Select a profile first, then enable 'Connect on Login'."
+                )
+                self._tray_autoconnect_action.setChecked(False)
+                self._menubar_autoconnect_action.setChecked(False)
+                return
+            settings["autoconnect_profile"] = profile
+            self._append_log(f"[settings] Auto-connect on login enabled for '{profile}'.")
+        else:
+            settings["autoconnect_profile"] = ""
+            self._append_log("[settings] Auto-connect on login disabled.")
+        _save_settings(settings)
+        self._tray_autoconnect_action.setChecked(enabled)
+        self._menubar_autoconnect_action.setChecked(enabled)
+
+    def _on_toggle_autoconnect(self):
+        self._set_autoconnect(self.sender().isChecked())
+
+    def _autoconnect_on_boot(self):
+        profile_name = _load_settings().get("autoconnect_profile", "")
+        if not profile_name:
+            return
+        if self._status in (ST_CONNECTED, ST_CONNECTING, ST_AWAITING_AUTH):
+            self._append_log("[autoconnect] Already connected — skipping auto-connect.")
+            return
+        if profile_name not in self._profile_names():
+            self._append_log(f"[autoconnect] Profile '{profile_name}' not found — skipping.")
+            return
+        self._append_log(f"[autoconnect] Auto-connecting to '{profile_name}'…")
+        self.profile_combo.setCurrentText(profile_name)
+        self._on_connect()
+
     # ── Tray / window visibility ──────────────────────────────────────────────
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
@@ -857,6 +935,8 @@ class VPNWindow(QMainWindow):
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 def main():
+    start_minimized = "--minimized" in sys.argv
+
     app = QApplication(sys.argv)
     app.setApplicationName("OpenVPN3 GUI")
     app.setQuitOnLastWindowClosed(False)
@@ -865,8 +945,9 @@ def main():
         QMessageBox.critical(None, "OpenVPN3 GUI", "No system tray available.")
         sys.exit(1)
 
-    window = VPNWindow()
-    window.show()
+    window = VPNWindow(start_minimized=start_minimized)
+    if not start_minimized:
+        window.show()
     sys.exit(app.exec_())
 
 
