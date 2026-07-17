@@ -13,6 +13,7 @@ import subprocess
 import threading
 import stat
 import html
+import time
 from datetime import datetime
 
 from PyQt5.QtWidgets import (
@@ -832,7 +833,10 @@ class VPNWindow(QMainWindow):
         try:
             with open(AUTOSTART_FILE) as f:
                 content = f.read()
-            if f"Exec={expected_exec}" in content:
+            if (
+                f"Exec={expected_exec}" in content
+                and "X-GNOME-Autostart-Delay=3" in content
+            ):
                 return
             with open(AUTOSTART_FILE, "w") as f:
                 f.write(
@@ -841,8 +845,9 @@ class VPNWindow(QMainWindow):
                     f"Exec={expected_exec}\n"
                     "Type=Application\n"
                     "X-GNOME-Autostart-enabled=true\n"
+                    "X-GNOME-Autostart-Delay=3\n"
                 )
-            self._append_log("[settings] Updated autostart entry to include --minimized.")
+            self._append_log("[settings] Updated autostart entry.")
         except OSError as e:
             self._append_log(f"[settings] Could not refresh autostart file: {e}")
 
@@ -855,6 +860,7 @@ class VPNWindow(QMainWindow):
                 f"Exec={_autostart_exec()}\n"
                 "Type=Application\n"
                 "X-GNOME-Autostart-enabled=true\n"
+                "X-GNOME-Autostart-Delay=3\n"
             )
             try:
                 with open(AUTOSTART_FILE, "w") as f:
@@ -964,8 +970,23 @@ def main():
     app.setApplicationName("OpenVPN3 GUI")
     app.setQuitOnLastWindowClosed(False)
 
+    # Wait for the system tray host to be ready.  At login the tray may not be
+    # available immediately, so retry instead of failing outright.
+    # Autostart launches use a longer timeout; manual launches fail faster.
+    max_wait_ms = 30000 if start_minimized else 3000
+    interval_ms = 500
+    waited_ms = 0
+    while not QSystemTrayIcon.isSystemTrayAvailable() and waited_ms < max_wait_ms:
+        app.processEvents()
+        time.sleep(interval_ms / 1000)
+        waited_ms += interval_ms
+
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, "OpenVPN3 GUI", "No system tray available.")
+        QMessageBox.critical(
+            None, "OpenVPN3 GUI",
+            "No system tray available.\n"
+            "Please start the app manually once the desktop is ready."
+        )
         sys.exit(1)
 
     window = VPNWindow(start_minimized=start_minimized)
