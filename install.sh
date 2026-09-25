@@ -3,6 +3,45 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+run_as_root() {
+    if (( EUID == 0 )); then
+        "$@"
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$@"
+    else
+        echo "Error: Native Qt dependencies require root privileges. Install sudo or run this installer as root." >&2
+        exit 1
+    fi
+}
+
+install_qt_dependencies() {
+    if command -v apt-get >/dev/null 2>&1; then
+        echo "Installing native Qt/XCB dependencies..."
+        run_as_root apt-get update
+        run_as_root apt-get install -y \
+            libgl1 \
+            libxcb-cursor0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxkbcommon-x11-0
+    elif command -v dnf >/dev/null 2>&1; then
+        echo "Installing native Qt/XCB dependencies..."
+        run_as_root dnf install -y \
+            libxkbcommon-x11 \
+            mesa-libGL \
+            xcb-util-cursor \
+            xcb-util-image \
+            xcb-util-keysyms \
+            xcb-util-renderutil \
+            xcb-util-wm
+    else
+        echo "Warning: Could not install native Qt/XCB dependencies automatically."
+    fi
+}
+
 # Define paths
 OLD_INSTALL_DIR="$HOME/.local/lib/openvpn3-gui"
 OLD_BIN_PATH="$HOME/.local/bin/openvpn3-gui"
@@ -18,6 +57,8 @@ fi
 if ! command -v openvpn3 &> /dev/null; then
     echo "Warning: openvpn3 is not installed or not in PATH."
 fi
+
+install_qt_dependencies
 
 # Clean up older installation if it exists
 if [ -d "$OLD_INSTALL_DIR" ] || [ -f "$OLD_BIN_PATH" ]; then

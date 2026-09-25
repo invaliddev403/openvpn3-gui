@@ -35,6 +35,7 @@ cd openvpn3-gui
 ```
 
 The installer:
+- Installs the native Qt/XCB libraries required by PyQt5
 - Cleans up legacy installations (`~/.local/lib/openvpn3-gui`)
 - Installs the app via `pipx` (creates an isolated environment and adds both `openvpn3-gui` and `openvpn3-cli` to your `PATH`)
 - Installs a `.desktop` entry for app launchers
