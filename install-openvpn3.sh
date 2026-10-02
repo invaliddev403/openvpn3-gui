@@ -22,6 +22,16 @@ run_as_root() {
 install_apt() {
     local codename=${VERSION_CODENAME:-}
 
+    if [[ ${ID:-} == zorin ]]; then
+        # Zorin uses Ubuntu repositories; 18.x is based on Ubuntu 24.04.
+        codename=${UBUNTU_CODENAME:-}
+        if [[ -z $codename ]]; then
+            case "${VERSION_ID:-}" in
+                18|18.*) codename=noble ;;
+            esac
+        fi
+    fi
+
     case "$codename" in
         bookworm|trixie|jammy|noble|questing|resolute) ;;
         *)
@@ -51,7 +61,8 @@ install_apt() {
         run_as_root tee /etc/apt/sources.list.d/openvpn3.list >/dev/null
 
     run_as_root apt-get update
-    run_as_root apt-get install -y openvpn3-client
+    # Optional openvpn-dco-dkms can fail to build on newer kernels.
+    run_as_root apt-get install -y --no-install-recommends openvpn3-client
 }
 
 install_rhel() {
@@ -90,7 +101,7 @@ fi
 printf 'Installing OpenVPN 3 Linux on %s...\n' "${PRETTY_NAME:-$ID}"
 
 case "${ID:-}" in
-    debian|ubuntu) install_apt ;;
+    debian|ubuntu|zorin) install_apt ;;
     rhel) install_rhel ;;
     fedora) install_fedora ;;
     *) die "Unsupported distribution: ${PRETTY_NAME:-${ID:-unknown}}" ;;
