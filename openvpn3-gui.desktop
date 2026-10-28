@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=OpenVPN3 GUI
 Comment=OpenVPN3 GUI client with tray icon
-Exec=%h/.local/bin/openvpn3-gui
+Exec=@GUI_EXEC@
 Icon=network-vpn
 Terminal=false
 Type=Application

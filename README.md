@@ -49,8 +49,9 @@ The installer:
 - Installs the native Qt/XCB libraries required by PyQt5
 - Cleans up legacy installations (`~/.local/lib/openvpn3-gui`)
 - Installs the app via `pipx` using `/usr/bin/python3` and `--system-site-packages`, so both ARM64 and x86_64 use the distribution's native PyQt5 rather than needing a PyPI Qt wheel or a source build
-- Checks Python dependencies and runs `pipx ensurepath` for both `openvpn3-gui` and `openvpn3-cli` (a new terminal may be needed)
-- Installs a `.desktop` entry for app launchers
+- Checks GUI/CLI and Qt imports and runs `pipx ensurepath` for both `openvpn3-gui` and `openvpn3-cli` (a new terminal may be needed)
+- Installs **OpenVPN3 GUI** in the applications menu under Network, using
+  `${XDG_DATA_HOME:-~/.local/share}/applications` and the installed pipx executable
 - Copies any bundled `.ovpn` files into the profiles directory with secure permissions
 - Fixes the autostart entry (`~/.config/autostart/openvpn3-gui.desktop`) if it exists but is missing the `--minimized` flag
 - Applies the desktop session watcher startup fix when the upstream helper is installed (see below)

@@ -52,7 +52,7 @@ install_dependencies() {
 # Define paths
 OLD_INSTALL_DIR="$HOME/.local/lib/openvpn3-gui"
 OLD_BIN_PATH="$HOME/.local/bin/openvpn3-gui"
-DESKTOP_DIR="$HOME/.local/share/applications"
+DESKTOP_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 PROFILES_DIR="$HOME/.config/openvpn3-gui/profiles"
 
 # Install into the desktop user's account, using sudo only for system packages.
@@ -96,8 +96,12 @@ if [ -d "$PIPX_VENVS/openvpn3-gui" ]; then
     pipx uninstall openvpn3-gui
 fi
 pipx install --force --python "$SYSTEM_PYTHON" --system-site-packages "$SCRIPT_DIR"
-pipx runpip openvpn3-gui check
+# System site packages can have unrelated dependency issues. Verify this app
+# and its native Qt bindings without blocking on other distro packages.
+"$PIPX_VENVS/openvpn3-gui/bin/python" -c \
+    'from PyQt5 import QtCore, QtGui, QtWidgets; import vpn_gui, vpn_cli'
 pipx ensurepath
+PIPX_BIN_DIR=$(pipx environment --value PIPX_BIN_DIR)
 
 # Ensure directories exist with proper permissions
 mkdir -p "$DESKTOP_DIR"
@@ -117,11 +121,27 @@ for ovpn in "$SCRIPT_DIR"/*.ovpn; do
     fi
 done
 
-# Update desktop entry
-if [ -f "$SCRIPT_DIR/openvpn3-gui.desktop" ]; then
-    echo "Installing desktop entry..."
-    sed "s|%h|$HOME|g" "$SCRIPT_DIR/openvpn3-gui.desktop" > "$DESKTOP_DIR/openvpn3-gui.desktop"
-    update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+# Install a launcher that works even before the desktop session picks up PATH.
+echo "Installing applications menu launcher..."
+"$SYSTEM_PYTHON" - "$SCRIPT_DIR/openvpn3-gui.desktop" \
+    "$DESKTOP_DIR/openvpn3-gui.desktop" "$PIPX_BIN_DIR/openvpn3-gui" <<'PY'
+import pathlib
+import sys
+
+template, destination, executable = sys.argv[1:]
+if not pathlib.Path(executable).is_file():
+    raise SystemExit(f"Error: Installed GUI executable is missing: {executable}")
+# Exec has its own quoting rules, followed by desktop-entry string escaping.
+quoted = executable.replace("%", "%%")
+for character in ('\\', '"', '`', '$'):
+    quoted = quoted.replace(character, '\\' + character)
+quoted = quoted.replace('\\', '\\\\')
+entry = pathlib.Path(template).read_text().replace('@GUI_EXEC@', f'"{quoted}"')
+pathlib.Path(destination).write_text(entry)
+pathlib.Path(destination).chmod(0o644)
+PY
+if command -v update-desktop-database >/dev/null 2>&1; then
+    update-desktop-database "$DESKTOP_DIR"
 fi
 
 # Fix autostart file if it exists but is missing --minimized or the GNOME delay
@@ -148,9 +168,11 @@ bash "$SCRIPT_DIR/desktop-fixes/install.sh"
 
 echo ""
 echo "Done. v$VERSION installed."
-echo "  GUI:      ~/.local/bin/openvpn3-gui"
-echo "  CLI:      ~/.local/bin/openvpn3-cli"
+echo "  GUI:      $PIPX_BIN_DIR/openvpn3-gui"
+echo "  CLI:      $PIPX_BIN_DIR/openvpn3-cli"
+echo "  Launcher: $DESKTOP_DIR/openvpn3-gui.desktop"
 echo "  Profiles: $PROFILES_DIR/"
 echo ""
 echo "Launch the GUI:    openvpn3-gui"
+echo "Or select OpenVPN3 GUI in your applications menu."
 echo "Use the CLI:       openvpn3-cli --help"
