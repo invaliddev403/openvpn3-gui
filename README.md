@@ -23,8 +23,13 @@ A PyQt5 desktop client and system tray icon for the [`openvpn3`](https://github.
 ## Requirements
 
 - Python 3.10+
-- [`pipx`](https://pypa.github.io/pipx/) installed
-- [`openvpn3`](https://openvpn.net/cloud-docs/owner/connectors/connector-user-guides/openvpn-3-client-for-linux.html) installed (typically at `/usr/bin/openvpn3`)
+- ARM64 (`aarch64`) or x86_64 (`amd64`) Linux with a desktop session
+- An apt- or dnf-based distribution supported by the OpenVPN 3 installer
+- `sudo` access to install system packages, and internet access to package repositories and PyPI
+
+The installer installs `pipx`, the distribution's native PyQt5 package, and
+[`openvpn3`](https://community.openvpn.net/Pages/OpenVPN3Linux) if missing.
+OpenVPN's upstream ARM64 packages are currently described as tech-preview.
 
 ## Installation
 
@@ -34,19 +39,30 @@ cd openvpn3-gui
 ./install.sh
 ```
 
+Run the installer as your normal desktop user, without `sudo`; it requests
+privileges for system packages as needed. Ubuntu 22.04, 24.04, 25.10, 26.04,
+Debian 12/13, Zorin OS 18, Fedora and RHEL are handled by the backend installer
+(repository/package availability still depends on the release).
+
 The installer:
+- Runs `install-openvpn3.sh` if the OpenVPN 3 backend is missing
 - Installs the native Qt/XCB libraries required by PyQt5
 - Cleans up legacy installations (`~/.local/lib/openvpn3-gui`)
-- Installs the app via `pipx` (creates an isolated environment and adds both `openvpn3-gui` and `openvpn3-cli` to your `PATH`)
+- Installs the app via `pipx` using `/usr/bin/python3` and `--system-site-packages`, so both ARM64 and x86_64 use the distribution's native PyQt5 rather than needing a PyPI Qt wheel or a source build
+- Checks Python dependencies and runs `pipx ensurepath` for both `openvpn3-gui` and `openvpn3-cli` (a new terminal may be needed)
 - Installs a `.desktop` entry for app launchers
 - Copies any bundled `.ovpn` files into the profiles directory with secure permissions
 - Fixes the autostart entry (`~/.config/autostart/openvpn3-gui.desktop`) if it exists but is missing the `--minimized` flag
+- Applies the desktop session watcher startup fix when the upstream helper is installed (see below)
 
 Make sure `~/.local/bin` is in your `PATH`, then launch the GUI:
 
 ```bash
 openvpn3-gui
 ```
+
+To install only the OpenVPN 3 backend, run `./install-openvpn3.sh`.
+32-bit ARM and 32-bit x86 are not supported by this installation path.
 
 Or use the CLI directly:
 
@@ -56,7 +72,42 @@ openvpn3-cli --help
 
 ### Upgrading
 
-Re-run `./install.sh` — it will upgrade the app using `pipx`. User profiles are never overwritten.
+Re-run `./install.sh` — it recreates the app's `pipx` environment to migrate older
+installs to the system Python and native Qt packages. User profiles and settings
+are kept outside that environment and are preserved.
+
+### Desktop notification startup fix
+
+Some desktops start OpenVPN's `openvpn3-desktop-session-watcher` before the
+notification service is ready. The installer includes a wrapper that waits for
+`org.freedesktop.Notifications` before starting the upstream watcher. D-Bus or
+runtime failures exit through Python with status 1, allowing systemd to retry
+after 15 seconds without generating an unhandled Python crash report.
+
+The fix is installed only when `/usr/bin/openvpn3-desktop-session-watcher`
+exists. It requires the system Python's `dbus` module and an available systemd
+user manager. Run the installer from your desktop login session. To apply only
+this fix, run:
+
+```bash
+./desktop-fixes/install.sh
+```
+
+It installs `~/.local/libexec/openvpn-session-watcher.py` and a user service
+override at
+`~/.config/systemd/user/openvpn3-desktop-session-watcher.service.d/desktop-startup.conf`.
+An existing override is backed up before replacement. Only the notification
+watcher service is restarted; VPN sessions are left running. Existing crash
+reports are preserved.
+
+To remove the workaround and return to the upstream service configuration:
+
+```bash
+rm ~/.config/systemd/user/openvpn3-desktop-session-watcher.service.d/desktop-startup.conf
+systemctl --user daemon-reload
+systemctl --user restart openvpn3-desktop-session-watcher.service
+rm ~/.local/libexec/openvpn-session-watcher.py
+```
 
 ## CLI usage
 
@@ -116,6 +167,8 @@ openvpn3-gui/
 ├── vpn_cli.py            # CLI application
 ├── openvpn3-gui.desktop  # Desktop entry (template)
 ├── install.sh            # Installer / upgrade script
+├── install-openvpn3.sh   # OpenVPN 3 backend installer
+├── desktop-fixes/        # Notification watcher wrapper and installer
 └── .gitignore            # Excludes *.ovpn files
 ```
 

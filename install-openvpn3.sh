@@ -21,6 +21,8 @@ run_as_root() {
 
 install_apt() {
     local codename=${VERSION_CODENAME:-}
+    local architecture
+    architecture=$(dpkg --print-architecture)
 
     if [[ ${ID:-} == zorin ]]; then
         # Zorin uses Ubuntu repositories; 18.x is based on Ubuntu 24.04.
@@ -39,7 +41,7 @@ install_apt() {
             ;;
     esac
 
-    case "$(dpkg --print-architecture)" in
+    case "$architecture" in
         amd64|arm64) ;;
         *) die "OpenVPN's Debian repository supports only amd64 and arm64." ;;
     esac
@@ -56,8 +58,8 @@ install_apt() {
     rm -f "$key_file"
     trap - EXIT
 
-    printf 'deb [signed-by=/etc/apt/keyrings/openvpn.asc] %s %s main\n' \
-        "$OPENVPN_APT_REPO" "$codename" |
+    printf 'deb [arch=%s signed-by=/etc/apt/keyrings/openvpn.asc] %s %s main\n' \
+        "$architecture" "$OPENVPN_APT_REPO" "$codename" |
         run_as_root tee /etc/apt/sources.list.d/openvpn3.list >/dev/null
 
     run_as_root apt-get update

@@ -9,16 +9,19 @@ run_as_root() {
     elif command -v sudo >/dev/null 2>&1; then
         sudo "$@"
     else
-        echo "Error: Native Qt dependencies require root privileges. Install sudo or run this installer as root." >&2
+        echo "Error: Installing system dependencies requires sudo." >&2
         exit 1
     fi
 }
 
-install_qt_dependencies() {
+install_dependencies() {
     if command -v apt-get >/dev/null 2>&1; then
         echo "Installing native Qt/XCB dependencies..."
         run_as_root apt-get update
         run_as_root apt-get install -y \
+            pipx \
+            python3-venv \
+            python3-pyqt5 \
             libgl1 \
             libxcb-cursor0 \
             libxcb-icccm4 \
@@ -30,6 +33,9 @@ install_qt_dependencies() {
     elif command -v dnf >/dev/null 2>&1; then
         echo "Installing native Qt/XCB dependencies..."
         run_as_root dnf install -y \
+            pipx \
+            python3-pip \
+            python3-qt5 \
             libxkbcommon-x11 \
             mesa-libGL \
             xcb-util-cursor \
@@ -38,7 +44,8 @@ install_qt_dependencies() {
             xcb-util-renderutil \
             xcb-util-wm
     else
-        echo "Warning: Could not install native Qt/XCB dependencies automatically."
+        echo "Error: Automatic installation requires apt-get or dnf." >&2
+        exit 1
     fi
 }
 
@@ -48,17 +55,27 @@ OLD_BIN_PATH="$HOME/.local/bin/openvpn3-gui"
 DESKTOP_DIR="$HOME/.local/share/applications"
 PROFILES_DIR="$HOME/.config/openvpn3-gui/profiles"
 
-# Check for dependencies
-if ! command -v pipx &> /dev/null; then
-    echo "Error: pipx is not installed. Please install pipx first (e.g., sudo apt install pipx)."
+# Install into the desktop user's account, using sudo only for system packages.
+if (( EUID == 0 )); then
+    echo "Error: Run ./install.sh as your normal desktop user, without sudo." >&2
     exit 1
 fi
 
+case "$(uname -m)" in
+    aarch64|arm64|x86_64|amd64) ;;
+    *) echo "Error: Supported architectures are ARM64 and x86_64." >&2; exit 1 ;;
+esac
+
 if ! command -v openvpn3 &> /dev/null; then
-    echo "Warning: openvpn3 is not installed or not in PATH."
+    bash "$SCRIPT_DIR/install-openvpn3.sh"
 fi
 
-install_qt_dependencies
+install_dependencies
+
+# The distro's Qt bindings are native on both ARM64 and x86_64. Use its
+# matching interpreter, even when another Python is first on PATH.
+SYSTEM_PYTHON=/usr/bin/python3
+"$SYSTEM_PYTHON" -c 'import sys; assert sys.version_info >= (3, 10), "Python 3.10+ is required"; from PyQt5 import QtCore, QtGui, QtWidgets'
 
 # Clean up older installation if it exists
 if [ -d "$OLD_INSTALL_DIR" ] || [ -f "$OLD_BIN_PATH" ]; then
@@ -72,7 +89,15 @@ VERSION=$(grep -oP 'APP_VERSION\s*=\s*"\K[^"]+' "$SCRIPT_DIR/vpn_gui.py")
 echo "Installing OpenVPN3 GUI + CLI v$VERSION via pipx..."
 
 # Use pipx to install the current directory
-pipx install --force "$SCRIPT_DIR"
+# --force alone reuses old environments, including their interpreter and Qt
+# wheels. Recreate this app's environment when migrating an existing install.
+PIPX_VENVS=$(pipx environment --value PIPX_LOCAL_VENVS)
+if [ -d "$PIPX_VENVS/openvpn3-gui" ]; then
+    pipx uninstall openvpn3-gui
+fi
+pipx install --force --python "$SYSTEM_PYTHON" --system-site-packages "$SCRIPT_DIR"
+pipx runpip openvpn3-gui check
+pipx ensurepath
 
 # Ensure directories exist with proper permissions
 mkdir -p "$DESKTOP_DIR"
@@ -117,6 +142,9 @@ X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=3
 EOF
 fi
+
+# Install the notification startup workaround when the upstream helper exists.
+bash "$SCRIPT_DIR/desktop-fixes/install.sh"
 
 echo ""
 echo "Done. v$VERSION installed."
